@@ -155,11 +155,55 @@ export const rideRequestNotification = functions.firestore.document('requests/{r
 
 export const requestAmbulance = functions.https.onRequest(async (request, response) => {
 
-    const patientId = request.query.pid?.toString();
-    const driverId = request.query.did?.toString();
-    const requestId = request.query.rid?.toString();
+    // const patientId = request.query.pid?.toString();
+    // const driverId = request.query.did?.toString();
+    // const requestId = request.query.rid?.toString();
+    let ambRequest = request.body;
 
 
+
+    const drivers = await db.collection('drivers').get()
+
+    const tokens: string[] = []
+
+    drivers.forEach(document => {
+
+        // console.log(`DATA: ${document.data().token}`);
+
+        tokens.push(document.data().token)
+    })
+
+
+
+    const payload: admin.messaging.MessagingPayload = {
+        notification: {
+            title: "Ambulance request",
+            body: `${ambRequest.patient_name} needs transport to ${ambRequest.destination_name}`,
+            clickAction: 'FLUTTER_NOTIFICATION_CLICK'
+        },
+        data: {
+            // Written to help later development, by maintaining same interface to client 
+            pid: ambRequest.pid,
+            patient_name: ambRequest.patient_name,
+            caretaker_name: ambRequest.caretaker_name,
+            caretaker_contact: ambRequest.caretaker_contact,
+            pickup_location: ambRequest.pickup_location.toString(),
+            pickup_landmarks: ambRequest.pickup_landmarks.toString(),
+            destination: ambRequest.destination.toString(),
+            destination_name: ambRequest.destination_name,
+            patient_condition: ambRequest.patient_condition,
+            special_needs: ambRequest.special_needs.toString(),
+
+            type: 'RIDE_REQUEST'
+
+        }
+    }
+    let driver_cnt = tokens.length;
+    console.log(`NUMBER OF TOKENS IS: ${tokens.length}`);
+
+
+    await fcm.sendToDevice(tokens, payload);
+    response.send({ status: true, message: "Notification Sent to  " + driver_cnt + " drivers.", data: [] }).send(200);
 })
 
 
