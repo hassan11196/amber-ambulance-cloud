@@ -9,6 +9,7 @@
     "target": "es2017",
     "noUnusedLocals": false,
   },
+  "comma-dangle": ["error", "never"],
   "compileOnSave": true,
   "include": [
     "src"
