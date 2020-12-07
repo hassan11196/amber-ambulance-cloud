@@ -1,8 +1,13 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin'
+const debug = require("@google-cloud/debug-agent").start({ allowExpresions: true })
 admin.initializeApp();
 const db = admin.firestore();
 const fcm = admin.messaging();
+debug.isReady().then(() => {
+    let debugInitialized = true
+    console.log("Debugger is initialize")
+});
 
 export const locationReachedNotification = functions.https.onRequest(async (request, response) => {
     const userId = request.query.uid?.toString();
@@ -148,6 +153,14 @@ export const rideRequestNotification = functions.firestore.document('requests/{r
 )
 
 
+export const requestAmbulance = functions.https.onRequest(async (request, response) => {
+
+    const patientId = request.query.pid?.toString();
+    const driverId = request.query.did?.toString();
+    const requestId = request.query.rid?.toString();
+
+
+})
 
 
 
