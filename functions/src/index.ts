@@ -1,9 +1,11 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin'
+
 const debug = require("@google-cloud/debug-agent").start({ allowExpresions: true })
 admin.initializeApp();
 const db = admin.firestore();
 const fcm = admin.messaging();
+
 debug.isReady().then(() => {
     let debugInitialized = true
     console.log("Debugger is initialize")
@@ -107,51 +109,102 @@ export const rideAcceptedNotification = functions.firestore.document('requests/{
 
 });
 
-export const rideRequestNotification = functions.firestore.document('requests/{requestId}').onCreate(
-    async snapshot => {
-        const rideRequet = snapshot.data();
+// export const rideRequestNotification = functions.firestore.document('requests/{requestId}').onCreate(
+//     async snapshot => {
+//         const rideRequet = snapshot.data();
 
-        const tokens: string[] = []
+//         const tokens: string[] = []
 
-        const drivers = await db.collection('drivers').get()
+//         const drivers = await db.collection('drivers').get()
 
-        drivers.forEach(document => {
+//         drivers.forEach(document => {
 
-            console.log(`DATA: ${document.data().token}`);
+//             console.log(`DATA: ${document.data().token}`);
 
-            tokens.push(document.data().token)
-        })
+//             tokens.push(document.data().token)
+//         })
 
 
 
-        const payload: admin.messaging.MessagingPayload = {
-            notification: {
-                title: "Ride request",
-                body: `${rideRequet.username} is looking for a ride to ${rideRequet.destination.address}`,
-                clickAction: 'FLUTTER_NOTIFICATION_CLICK'
-            },
-            data: {
-                username: rideRequet.username,
-                destination: rideRequet.destination.address,
-                distance_text: rideRequet.distance.text,
-                distance_value: rideRequet.distance.value.toString(),
-                destination_latitude: rideRequet.destination.latitude.toString(),
-                destination_longitude: rideRequet.destination.longitude.toString(),
-                user_latitude: rideRequet.position.latitude.toString(),
-                user_longitude: rideRequet.position.longitude.toString(),
-                id: rideRequet.id,
-                userId: rideRequet.userId,
-                type: 'RIDE_REQUEST'
+//         const payload: admin.messaging.MessagingPayload = {
+//             notification: {
+//                 title: "Ride request",
+//                 body: `${rideRequet.username} is looking for a ride to ${rideRequet.destination.address}`,
+//                 clickAction: 'FLUTTER_NOTIFICATION_CLICK'
+//             },
+//             data: {
+//                 username: rideRequet.username,
+//                 destination: rideRequet.destination.address,
+//                 distance_text: rideRequet.distance.text,
+//                 distance_value: rideRequet.distance.value.toString(),
+//                 destination_latitude: rideRequet.destination.latitude.toString(),
+//                 destination_longitude: rideRequet.destination.longitude.toString(),
+//                 user_latitude: rideRequet.position.latitude.toString(),
+//                 user_longitude: rideRequet.position.longitude.toString(),
+//                 id: rideRequet.id,
+//                 userId: rideRequet.userId,
+//                 type: 'RIDE_REQUEST'
 
-            }
+//             }
+//         }
+
+//         console.log(`NUMBER OF TOKENS IS: ${tokens.length}`);
+
+//         return fcm.sendToDevice(tokens, payload);
+//     }
+// )
+let AMB_STATUs = {
+    PENDING: "PENDING",
+    ENROUTE_TO_PATIENT: "ENROUTE_TO_PATIENT",
+    ENROUTE_TO_HOSPITAL: "ENROUTE_TO_HOSPITAL",
+    COMPLETE: "COMPLETE",
+    CANCELLED: "CANCELLED"
+
+}
+
+export const getAmbulanceUpdate = functions.https.onRequest(async (request, response) => {
+    const rid = request.query.rid?.toString() || "";
+    console.log(rid);
+    const requestRef = db.collection("request").doc(rid);
+
+    let requestData = await requestRef.get().then(async function (doc) {
+        if (doc.exists) {
+            console.log("Request data:", doc.data());
+            return doc.data();
+        } else {
+            // doc.data() will be undefined in this case
+
+            console.log("No Request fot this rid!");
+            return {};
         }
+    }).catch(function (error) {
+        console.log("Error getting Request:", error);
+        return {};
+    }) || {};
+    let driverData = null;
+    if (requestData.driverId != "") {
 
-        console.log(`NUMBER OF TOKENS IS: ${tokens.length}`);
 
-        return fcm.sendToDevice(tokens, payload);
+        const driverRef = db.collection("drivers").doc(requestData.driverId)
+        driverData = await driverRef.get().then(async function (doc) {
+            if (doc.exists) {
+                console.log("Driver data:", doc.data());
+                return doc.data();
+            } else {
+                // doc.data() will be undefined in this case
+
+                console.log("No Driver Found!");
+                return {};
+            }
+        }).catch(function (error) {
+            console.log("Error getting driver:", error);
+            return {};
+        }) || {};
     }
-)
 
+    response.send({ status: true, message: "Ambulance Request Data.", data: { request: requestData, driver: driverData } }).send(200);
+
+})
 
 export const requestAmbulance = functions.https.onRequest(async (request, response) => {
 
@@ -159,6 +212,57 @@ export const requestAmbulance = functions.https.onRequest(async (request, respon
     // const driverId = request.query.did?.toString();
     // const requestId = request.query.rid?.toString();
     let ambRequest = request.body;
+
+    const pid = ambRequest.patient.name + "_" + ambRequest.caretaker.cnic;
+    const cid = ambRequest.caretaker.cnic;
+    const rid = Math.floor(Date.now() / 1000) + "_" + ambRequest.caretaker.cnic;
+
+    const patientRef = db.collection("patient").doc(pid);
+    const caretakerRef = db.collection("caretaker").doc(cid);
+    const requestRef = db.collection("request").doc(rid);
+
+
+
+
+
+    caretakerRef.get().then(async function (doc) {
+        if (doc.exists) {
+            console.log("Caretaker data:", doc.data());
+        } else {
+            // doc.data() will be undefined in this case
+            await caretakerRef.set({ ...ambRequest.caretaker, id: cid })
+            console.log("Caretaker Created!");
+        }
+    }).catch(function (error) {
+        console.log("Error getting Caretaker:", error);
+    });
+
+    patientRef.get().then(async function (doc) {
+        if (doc.exists) {
+            console.log("Patient data:", doc.data());
+        } else {
+            // doc.data() will be undefined in this case
+            await patientRef.set({ ...ambRequest.patient, id: pid, caretaker: caretakerRef })
+            console.log("Patient Created!");
+        }
+    }).catch(function (error) {
+        console.log("Error getting Patient:", error);
+    });
+
+    await requestRef.set({
+        id: rid,
+        caretaker: caretakerRef,
+        patient: patientRef,
+        driver: null,
+        driverId: "",
+        pickup: ambRequest.pickup,
+        destination: ambRequest.destination,
+        patient_condition: ambRequest.patient_condition,
+        reason_for_transport: ambRequest.reason_for_transport,
+        special_needs: ambRequest.special_needs,
+        distance: ambRequest.distance,
+        status: AMB_STATUs.PENDING
+    });
 
 
 
@@ -175,6 +279,8 @@ export const requestAmbulance = functions.https.onRequest(async (request, respon
 
 
 
+    const caretaker = { ...ambRequest.caretaker, id: cid };
+    const patient = { ...ambRequest.patient, id: pid };
     const payload: admin.messaging.MessagingPayload = {
         notification: {
             title: "Ambulance request",
@@ -182,28 +288,28 @@ export const requestAmbulance = functions.https.onRequest(async (request, respon
             clickAction: 'FLUTTER_NOTIFICATION_CLICK'
         },
         data: {
-            // Written to help later development, by maintaining same interface to client 
-            pid: ambRequest.pid,
-            patient_name: ambRequest.patient_name,
-            caretaker_name: ambRequest.caretaker_name,
-            caretaker_contact: ambRequest.caretaker_contact,
-            pickup_location: ambRequest.pickup_location.toString(),
-            pickup_landmarks: ambRequest.pickup_landmarks.toString(),
-            destination: ambRequest.destination.toString(),
-            destination_name: ambRequest.destination_name,
+            id: rid,
+            caretaker: JSON.stringify(caretaker),
+            patient: JSON.stringify(patient),
+            pickup: JSON.stringify(ambRequest.pickup),
+            destination: JSON.stringify(ambRequest.destination),
             patient_condition: ambRequest.patient_condition,
-            special_needs: ambRequest.special_needs.toString(),
-
+            reason_for_transport: ambRequest.reason_for_transport,
+            special_needs: JSON.stringify(ambRequest.special_needs),
+            distance: ambRequest.distance,
+            status: AMB_STATUs.PENDING,
             type: 'RIDE_REQUEST'
 
         }
     }
+
+
     let driver_cnt = tokens.length;
     console.log(`NUMBER OF TOKENS IS: ${tokens.length}`);
 
 
     await fcm.sendToDevice(tokens, payload);
-    response.send({ status: true, message: "Notification Sent to  " + driver_cnt + " drivers.", data: [] }).send(200);
+    response.send({ status: true, message: "Notification Sent to  " + driver_cnt + " drivers.", data: payload.data }).send(200);
 })
 
 
